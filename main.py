@@ -5,6 +5,7 @@ from __future__ import absolute_import, unicode_literals
 
 import os
 import json
+import datetime
 
 from pyquery import PyQuery
 
@@ -129,6 +130,8 @@ def parse_itemcode(ROOT_PATH):
 
 if __name__ == "__main__":
     ROOT_PATH = '/007/data/www.stats.gov.cn'
-    for year in ['2012', '2013', '2014', '2015']:
+    # parse_admincode(ROOT_PATH, '2016')
+    parse_itemcode(ROOT_PATH)
+    for year in ['2010', '2011', '2012', '2013', '2014', '2015', '2016']:
+        print("%s : %s start " % (datetime.datetime.now(), year))
         parse_admincode(ROOT_PATH, year)
-    # parse_itemcode(ROOT_PATH)

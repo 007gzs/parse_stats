@@ -6,6 +6,8 @@ from __future__ import absolute_import, unicode_literals
 import queue
 import json
 import csv
+import pymysql
+import datetime
 
 
 MINGZU = ['蒙古族','回族','藏族','维吾尔族','苗族','彝族','壮族','布依族','朝鲜族','满族','侗族','瑶族','白族',
@@ -20,47 +22,78 @@ def proc_itemcode():
     children = queue.Queue()
     out = []
     for item in itemcode:
-        data = {'name':item['name'], 'code':item['code'], 'parent_code':'0'}
+        item['code'] = (item['code'] + ('0' * 10))[:10]
+        data = {'name':item['name'], 'code':item['code'], 'parent_code':'0000000000', 'full_name': item['name'], 'description':''}
         children.put((data, item['children']))
         out.append(data)
     while not children.empty():
         parent, child = children.get()
         for item in child:
-            data = {'name':item['name'], 'code':item['code'], 'parent_code':parent['code']}
+            item['code'] = (item['code'] + ('0' * 10))[:10]
+            data = {'name':item['name'], 'code':item['code'], 'parent_code':parent['code'], 'description':''}
             if 'towntypecode' in item:
-                data['desc'] = data['name']
+                data['description'] = data['name'] if data['name'] is not None else ''
                 data['name'] = item['towntypecode']
+            if data['name'] is None:
+                if item['code'] == '1704010302':
+                    data['name'] = '䌷丝'
+                elif item['code'] == '1704020104':
+                    data['name'] = '䌷丝及交织机织物'
+            if data['name'] != parent['name']:
+                data['full_name'] = parent['full_name'] + ' ' + data['name']
+            else:
+                data['full_name'] = parent['full_name']
             if item['code'] == parent['code']:
-                desc = data.get('desc', None)
-                if desc is not None:
-                    if 'desc' not in parent:
-                        parent['desc'] = desc
-                    elif parent['desc'] != desc:
-                        print("err %s %s %s" % (parent['code'], parent['desc'], desc))
+                desc = data['description']
+                if desc:
+                    if not parent['description']:
+                        parent['description'] = desc
+                    elif parent['description'] != desc:
+                        print("err %s %s %s" % (parent['code'], parent['description'], desc))
                     if 'children' in item:
                         print('err %s %s' % (parent['code'], item['children']))
                 continue
-
             if 'children' in item:
                 children.put((data, item['children']))
             out.append(data)
-    csvheaders = ['code', 'parent_code', 'name', 'desc']
+    csvheaders = ['code', 'parent_code', 'name', 'full_name', 'description']
     with open('itemcode.csv', 'w') as f:
         writer = csv.DictWriter(f, csvheaders)
         writer.writeheader()
         writer.writerows(out)
+    sqlhead = "INSERT INTO `item` (`code`, `parent_code`, `name`, `full_name`, `description`)values\n"
+    sql = ''
+    with open('itemcode.sql', 'w') as f:
+        for d in out:
+            if sql == "":
+                sql = sqlhead
+            else:
+                if len(sql) > 4096 * 1024:
+                    f.write(sql)
+                    f.write(';\n')
+                    sql = sqlhead
+                else:
+                    sql += ",\n"
+            sql += "(" 
+            sql += ",".join(["'%s'" % d[key] for key in csvheaders])
+            sql += ")"
+        f.write(sql)
+        f.write(';\n')
 
 def rstrip(data, chars):
     if len(data) <= 2:
         return data
-    ret = data.rstrip(chars)
+    chars_len = len(chars)
+    ret = data
+    while ret.endswith(chars):
+        ret = ret[:-chars_len]
     if len(ret) < 2:
         ret = data
     return ret
 
 def get_short_name(name, parent_short_name, parent_full_short_name, code_type):
 
-    if name in ('市辖区', '省直辖县级行政区划', '自治区直辖县级行政区划'):
+    if name in ('市辖区', '省直辖县级行政区划', '自治区直辖县级行政区划', '县'):
         return parent_short_name, parent_full_short_name
     short_name = name
 
@@ -78,11 +111,19 @@ def get_short_name(name, parent_short_name, parent_full_short_name, code_type):
             short_name = rstrip(short_name, '区')
         short_name = rstrip(short_name, '县')
         short_name = rstrip(short_name, '旗')
-        short_name = rstrip(short_name, '镇')
-        short_name = rstrip(short_name, '村')
-    while len(short_name) > 2 and short_name.endswith('族'):
-        for mz in MINGZU:
-            short_name = rstrip(short_name, mz)
+        short_name = rstrip(short_name, '盟')
+    short_name = rstrip(short_name, '镇')
+    short_name = rstrip(short_name, '村')
+    short_name = rstrip(short_name, '乡')
+    if short_name in MINGZU:
+        short_name = name
+    else:
+        while len(short_name) > 2 and short_name.endswith('族'):
+            lastlen = len(short_name)
+            for mz in MINGZU:
+                short_name = rstrip(short_name, mz)
+            if lastlen == len(short_name):
+                break
     lastlen = len(short_name)
     while True:
         for mz in MINGZU:
@@ -98,8 +139,8 @@ def get_short_name(name, parent_short_name, parent_full_short_name, code_type):
         return short_name, short_name
     return short_name, parent_full_short_name + " " + short_name
 
-def proc_admincode():
-    with open('admincode_2016.json') as f:
+def proc_admincode(year):
+    with open('admincode_%s.json' % year) as f:
         admincode = json.load(f)
     children = queue.Queue()
     out = []
@@ -107,20 +148,23 @@ def proc_admincode():
     for item in admincode:
         data = dict()
         data['adcode'] = item['code']
+        data['year'] = year
         data['parent_code'] = '000000000000'
         data['name'] = item['name']
         data['full_name'] = item['name']
         data['short_name'], data['full_short_name'] = get_short_name(item['name'], '', '', item['codetype'])
         data['code_type'] = item['codetype']
-        data['town_type_code'] = item.get('town_type_code', '')
+        data['town_type_code'] = item.get('towntypecode', '')
         children.put((data, item['children']))
         out.append(data)
         temp.add(data['short_name'][-1])
     while not children.empty():
+
         parent, child = children.get()
         for item in child:
             data = dict()
             data['adcode'] = item['code']
+            data['year'] = year
             data['parent_code'] = parent['adcode']
             data['name'] = item['name']
             if item['name'] is None:
@@ -129,20 +173,60 @@ def proc_admincode():
             data['full_name'] = parent['full_name'] + ' ' + item['name']
             data['short_name'], data['full_short_name'] = get_short_name(item['name'], parent['short_name'], parent['full_short_name'], item['codetype'])
             data['code_type'] = item['codetype']
-            data['town_type_code'] = item.get('town_type_code', '')
+            data['town_type_code'] = item.get('towntypecode', '')
             if 'children' in item:
                 children.put((data, item['children']))
             out.append(data)
-            if data['short_name'] == '':
-                print(data)
-            else:
-                temp.add(data['short_name'][-1])
-    print(temp)
-    csvheaders = ['adcode', 'parent_code', 'name', 'full_name', 'short_name', 'full_short_name', 'code_type', 'town_type_code']
-    with open('admincode.csv', 'w') as f:
+    sqlhead = "INSERT INTO `admincode` (`adcode`, `year`, `parent_code`, `name`, `full_name`, `short_name`, `full_short_name`, `code_type`, `town_type_code`)values\n"
+    sql = ''
+    csvheaders = ['adcode', 'year', 'parent_code', 'name', 'full_name', 'short_name', 'full_short_name', 'code_type', 'town_type_code']
+    with open('admincode_%s.csv' % year, 'w') as f:
         writer = csv.DictWriter(f, csvheaders)
         writer.writeheader()
         writer.writerows(out)
+    def get_value(d, key):
+        ret = d[key]
+        # if key == 'code_type':
+        #     if ret == 'province':
+        #         ret = 1
+        #     elif ret == 'city':
+        #         ret = 2
+        #     elif ret == 'county':
+        #         ret = 3
+        #     elif ret == 'town':
+        #         ret = 4
+        #     elif ret == 'village':
+        #         ret = 5
+        # elif key == 'town_type_code':
+        #     if ret == '':
+        #         ret = 0
+        return ret
+    with open('admincode_%s.sql' % year, 'w') as f:
+        for d in out:
+            if sql == "":
+                sql = sqlhead
+            else:
+                if len(sql) > 4096 * 1024:
+                    f.write(sql)
+                    f.write(';\n')
+                    sql = sqlhead
+                else:
+                    sql += ",\n"
+            sql += "(" 
+            # sql += ",".join(["'%s'" % d[key] for key in csvheaders])
+            sql += ",".join(["'%s'" % get_value(d, key) for key in csvheaders])
+            sql += ")"
+        f.write(sql)
+        f.write(';\n')
+
+    # mysql_conn = pymysql.connect("127.0.0.1", 'root', 'admin007', database='hb2c', port=3306, charset='utf8')
+    # with mysql_conn.cursor() as c:
+    #     c.execute(sql)
+    #     mysql_conn.commit()
+
 if __name__ == "__main__":
     proc_itemcode()
-    # proc_admincode()
+    # proc_admincode('2016')
+    for year in ['2010', '2011', '2012', '2013', '2014', '2015', '2016']:
+        print("%s : %s start " % (datetime.datetime.now(), year))
+        proc_admincode(year)
