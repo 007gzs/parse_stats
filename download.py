@@ -33,8 +33,8 @@ def conn(url, headers):
                 return None
             else:
                 time.sleep(0.5)
-def download(url, basepath, urlprefix, proc=set(), force=False):
-
+def download_and_save(url, basepath, urlprefix, force):
+    
     if not url.startswith(urlprefix) or url in proc:
         return
 
@@ -61,6 +61,11 @@ def download(url, basepath, urlprefix, proc=set(), force=False):
     else:
         with open(outfile, 'rb') as f:
             html = f.read()
+    return html
+
+def download(url, basepath, urlprefix, proc=set(), force=False):
+
+    html = download_and_save(url, basepath, urlprefix, force)
     proc.add(url)
     pyq = PyQuery(html)
     for a in pyq('a'):
