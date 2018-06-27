@@ -33,10 +33,9 @@ def conn(url, headers):
                 return None
             else:
                 time.sleep(0.5)
-def download_and_save(url, basepath, urlprefix, force):
-    
-    if not url.startswith(urlprefix) or url in proc:
-        return
+
+
+def download_and_save(url, basepath, force=False):
 
     urlobj = urllib.parse.urlparse(url)
     outpath = os.path.join(basepath, os.path.dirname(urlobj.path)[1:])
@@ -52,6 +51,7 @@ def download_and_save(url, basepath, urlprefix, force):
         "User-Agent":'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)',  
         "host": urlobj.hostname 
     }
+
     if force or not os.path.isfile(outfile):
         html = conn(url, headers)
         if html is None:
@@ -63,9 +63,12 @@ def download_and_save(url, basepath, urlprefix, force):
             html = f.read()
     return html
 
+
 def download(url, basepath, urlprefix, proc=set(), force=False):
 
-    html = download_and_save(url, basepath, urlprefix, force)
+    if not url.startswith(urlprefix) or url in proc:
+        return
+    html = download_and_save(url, basepath, force)
     proc.add(url)
     pyq = PyQuery(html)
     for a in pyq('a'):
