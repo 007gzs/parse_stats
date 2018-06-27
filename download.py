@@ -28,11 +28,11 @@ def conn(url, headers):
             c += 1
             conntime = time.time() - start
             logtime(url, conntime, e)
-            if c > 5:
+            if c > 2:
                 print("err: %s %s" % (url, e))
                 return None
             else:
-                time.sleep(0.5)
+                time.sleep(0.1)
 
 
 def download_and_save(url, basepath, force=False):
